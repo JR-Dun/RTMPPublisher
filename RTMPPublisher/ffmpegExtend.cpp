@@ -13,7 +13,7 @@ char *inputFile		= "temp\\error.jpg";			// 文件路径
 // 输出方式
 //1:RTMP推流				eg："rtmp://120.92.3.155:1935/live/stream1"
 //2:保存为本地视频文件	eg："C:\\JR_Dun\\git\\RTMPPublisher\\Debug\\stream.mp4"
-char *output = "rtmp://120.92.3.155:1935/live/stream1"; // 输出方式1： RTMP推流
+char *output = ""; // 输出方式1： RTMP推流
 
 const int fps = 20;			// 视频输出FPS
 const int width = 1280;		// 视频width
