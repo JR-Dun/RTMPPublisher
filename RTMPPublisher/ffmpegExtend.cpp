@@ -1,27 +1,52 @@
 #include "stdafx.h"
-#include "ffmpegExtend.h"
+#include "FFMPEGExtend.h"
+
+using namespace RTMPPublisher;
+using namespace System;
+using namespace System::Runtime::InteropServices;
+
 
 #define MAX_NAME_LEN 1024
 #define CAP_SCREEN	1
 #define CAP_CAMERA	2
-#define CAP_JPEG		3
+#define CAP_JPEG	3
 #define CAP_DEVICE	CAP_SCREEN
 
-char *inputCamera	= "video=Lenovo EasyCamera";	// 摄像头
-char *inputFile		= "temp\\error.jpg";			// 文件路径
+char *inputCamera = "video=Lenovo EasyCamera";	// 摄像头
 
 // 输出方式
 //1:RTMP推流				eg："rtmp://120.92.3.155:1935/live/stream1"
 //2:保存为本地视频文件	eg："C:\\JR_Dun\\git\\RTMPPublisher\\Debug\\stream.mp4"
-char *output = "rtmp://120.92.3.155:1935/live/stream1"; // 输出方式1： RTMP推流
+//char *output = "rtmp://120.92.3.155:1935/live/stream1";
+
+char *outputDomain = "rtmp://120.92.3.155:1935/live/";//也可以是本地文件路径
 
 const int fps = 20;			// 视频输出FPS
-const int width = 1280;		// 视频width
-const int height = 720;		// 视频height
+const int width = 800;		// 视频width
+const int height = 600;		// 视频height
 
-FFMPEGExtend::FFMPEGExtend(char *inputFilePath)
+FFMPEGExtend::FFMPEGExtend()
 {
-	init(inputFilePath);
+	//inputFile = "temp\\error.jpg";
+	//output = "rtmp://120.92.3.155:1935/live/stream1"
+}
+
+FFMPEGExtend::FFMPEGExtend(char *_courseId)
+{
+	courseId = _courseId;
+	char *inputPath = new char[255];
+	char *outputPath = new char[255];
+	sprintf_s(inputPath, 255, "%s%s.jpg", "temp\\", courseId);
+	sprintf_s(outputPath, 255, "%s%s", outputDomain, courseId);
+
+	isWorking = false;
+	init(inputPath, outputPath);
+}
+
+FFMPEGExtend::FFMPEGExtend(char *inputPath, char *outputPath)
+{
+	isWorking = false;
+	init(inputPath, outputPath);
 }
 
 FFMPEGExtend::~FFMPEGExtend()
@@ -51,15 +76,20 @@ void FFMPEGExtend::getMp3Info()
 	system("pause");
 }
 
-void FFMPEGExtend::init(char *inputFilePath)
+void FFMPEGExtend::init(char *inputPath, char *outputPath)
 {
-	if (inputFilePath != NULL && inputFilePath[0] != '\0' && sizeof(inputFilePath) > 0)
+	if (inputPath != NULL && inputPath[0] != '\0' && sizeof(inputPath) > 0)
 	{
-		inputFile = inputFilePath;
+		inputFile = inputPath;
+	}
+
+	if (outputPath != NULL && outputPath[0] != '\0' && sizeof(outputPath) > 0)
+	{
+		output = outputPath;
 	}
 }
 
-void FFMPEGExtend::start()
+int FFMPEGExtend::start()
 {
 	vPixelFormatOutput = AV_PIX_FMT_YUV420P;
 
@@ -67,9 +97,32 @@ void FFMPEGExtend::start()
 	avformat_network_init();
 	avdevice_register_all();
 
-	initInput();
+	if (initInput() < 0)
+	{
+#if(CAP_DEVICE == CAP_JPEG)
+		avformat_close_input(&jpegFormatContext);
+		av_free(jpegFormatContext);
+#else
+		sws_freeContext(vSWSContext);
+		avformat_close_input(&vFormatContextInput);
+		av_free(vFormatContextInput);
+#endif
+		return -1;
+	}
+
 	initFrame();
-	initOutput();
+
+	if (initOutput() < 0)
+	{
+		av_frame_free(&videoFrame);
+
+		avcodec_close(vCodecContextOutput);
+		avio_close(vFormatContextOutput->pb);
+		avformat_free_context(vFormatContextOutput);
+		return -1;
+	}
+
+	return 0;
 }
 
 void FFMPEGExtend::dealloc()
@@ -87,7 +140,6 @@ void FFMPEGExtend::stop()
 	avformat_free_context(vFormatContextOutput);
 
 #if(CAP_DEVICE == CAP_JPEG)
-	sws_freeContext(jpegSWSContext);
 	avformat_close_input(&jpegFormatContext);
 	av_free(jpegFormatContext);
 #else
@@ -98,7 +150,7 @@ void FFMPEGExtend::stop()
 
 }
 
-void FFMPEGExtend::initInput()
+int FFMPEGExtend::initInput()
 {
 #if(CAP_DEVICE == CAP_JPEG)
 
@@ -114,7 +166,7 @@ void FFMPEGExtend::initInput()
 #if(CAP_DEVICE == CAP_SCREEN) // 录制屏幕
 	av_dict_set(&vOptionsInput, "offset_x", "0", 0);
 	av_dict_set(&vOptionsInput, "offset_y", "0", 0);
-	av_dict_set(&vOptionsInput, "video_size", "1280x720", 0);
+	av_dict_set(&vOptionsInput, "video_size", "800x600", 0);
 
 	AVInputFormat *inputFormat = av_find_input_format("gdigrab");
 	avformat_open_input(&vFormatContextInput, "desktop", inputFormat, NULL);
@@ -137,23 +189,37 @@ void FFMPEGExtend::initInput()
 
 	vCodecContextInput = vFormatContextInput->streams[videoIndex]->codec;
 	AVCodec *vCodecInput = avcodec_find_decoder(vCodecContextInput->codec_id);
-	avcodec_open2(vCodecContextInput, vCodecInput, NULL);
+	if (avcodec_open2(vCodecContextInput, vCodecInput, NULL) != 0)
+	{
+		centerError("initInput avcodec_open2 vCodecContextInput");
+		return -1;
+	}
 
 	vSWSContext = sws_getContext(width, height, vCodecContextInput->pix_fmt,
 		width, height, vPixelFormatOutput, SWS_BILINEAR, NULL, NULL, NULL);
 
 #endif
+
+	return 0;
 }
 
-void FFMPEGExtend::initOutput()
+int FFMPEGExtend::initOutput()
 {
 	char URL[MAX_NAME_LEN] = { 0 };
 	strcpy(URL, output);
 
 	vFormatContextOutput = NULL;
-	avformat_alloc_output_context2(&vFormatContextOutput, NULL, "flv", URL);
+	if (avformat_alloc_output_context2(&vFormatContextOutput, NULL, "flv", URL) < 0)
+	{
+		centerError("initOutput avformat_alloc_output_context2 vFormatContextOutput");
+		return -1;
+	}
 
-	avio_open(&(vFormatContextOutput->pb), URL, AVIO_FLAG_WRITE);
+	if (avio_open(&(vFormatContextOutput->pb), URL, AVIO_FLAG_WRITE) < 0)
+	{
+		centerError("initOutput avio_open vFormatContextOutput");
+		return -1;
+	}
 
 	videoStream = avformat_new_stream(vFormatContextOutput, NULL);
 
@@ -188,19 +254,37 @@ void FFMPEGExtend::initOutput()
 	}
 
 	AVCodec *vCodecOutput = avcodec_find_encoder(vCodecContextOutput->codec_id);
-	avcodec_open2(vCodecContextOutput, vCodecOutput, &vOptionsOutput);
+	if (avcodec_open2(vCodecContextOutput, vCodecOutput, &vOptionsOutput) != 0)
+	{
+		centerError("initOutput avcodec_open2 vCodecContextOutput");
+		return -1;
+	}
 
 	avformat_write_header(vFormatContextOutput, NULL);
+
+	return 0;
 }
 
-void FFMPEGExtend::openCodecContextJPEG()
+int FFMPEGExtend::openCodecContextJPEG()
 {
 	AVDictionary *vOptionsInput = NULL;
 	char c_fps[8] = { 0 };
 	itoa(fps, c_fps, 10);
-	av_dict_set(&vOptionsInput, "frame_rate", c_fps, 0);
-	avformat_open_input(&jpegFormatContext, inputFile, NULL, NULL);
-	avformat_find_stream_info(jpegFormatContext, NULL);
+	if (av_dict_set(&vOptionsInput, "frame_rate", c_fps, 0) < 0)
+	{
+		centerError("openCodecContextJPEG av_dict_set vOptionsInput");
+		return -1;
+	}
+	if (avformat_open_input(&jpegFormatContext, inputFile, NULL, NULL) != 0)
+	{
+		centerError("openCodecContextJPEG avformat_open_input jpegFormatContext");
+		return -1;
+	}
+	if (avformat_find_stream_info(jpegFormatContext, NULL) < 0)
+	{
+		centerError("openCodecContextJPEG avformat_find_stream_info jpegFormatContext");
+		return -1;
+	}
 
 	int videoIndex = -1;
 	for (int i = 0; i < jpegFormatContext->nb_streams; ++i)
@@ -214,14 +298,21 @@ void FFMPEGExtend::openCodecContextJPEG()
 
 	jpegCodecContext = jpegFormatContext->streams[videoIndex]->codec;
 	AVCodec *vCodecInput = avcodec_find_decoder(jpegCodecContext->codec_id);
-	avcodec_open2(jpegCodecContext, vCodecInput, NULL);
+	if (avcodec_open2(jpegCodecContext, vCodecInput, NULL) != 0)
+	{
+		centerError("openCodecContextJPEG avcodec_open2 jpegCodecContext");
+		return -1;
+	}
 
 	jpegSWSContext = sws_getContext(width, height, jpegCodecContext->pix_fmt,
 		width, height, vPixelFormatOutput, SWS_BILINEAR, NULL, NULL, NULL);
+
+	return 0;
 }
 
 void FFMPEGExtend::closeCodecContextJPEG()
 {
+	sws_freeContext(jpegSWSContext);
 	avcodec_close(jpegCodecContext);
 	avformat_close_input(&jpegFormatContext);
 }
@@ -235,19 +326,16 @@ void FFMPEGExtend::initFrame()
 	avpicture_fill((AVPicture*)videoFrame, buffer, vPixelFormatOutput, width, height);
 }
 
-void FFMPEGExtend::catchVideoFrame(int frameIndex)
+int FFMPEGExtend::catchVideoFrame(int frameIndex)
 {
 	AVPacket* packetIn = av_packet_alloc(); // ALLOC_PACKET_IN
 	AVFrame* frameIn = av_frame_alloc();    // ALLOC_FRAME_IN
 
-	av_read_frame(vFormatContextInput, packetIn);
-
-	//替换视频帧
-	//uint8_t *jpegBuffer = getFileBuffer();
-	//if (frameIndex > 100 && false)
-	//{
-	//	packetIn->data = jpegBuffer;
-	//}
+	if (av_read_frame(vFormatContextInput, packetIn) < 0)
+	{
+		centerError("catchVideoFrame av_read_frame vFormatContextInput");
+		return -1;
+	}
 
 	int got;
 	avcodec_decode_video2(vCodecContextInput, frameIn, &got, packetIn);
@@ -256,7 +344,7 @@ void FFMPEGExtend::catchVideoFrame(int frameIndex)
 	videoFrame->format = vCodecContextOutput->pix_fmt;
 	videoFrame->width = width;
 	videoFrame->height = height;
-	videoFrame->pts = frameIndex*(videoStream->time_base.den) / ((videoStream->time_base.num) * fps);
+	videoFrame->pts = frameIndex * (videoStream->time_base.den) / ((videoStream->time_base.num) * fps);
 
 	AVPacket *packetOut = av_packet_alloc(); // ALLOC_PACKET_OUT
 	avcodec_encode_video2(vCodecContextOutput, packetOut, videoFrame, &got);
@@ -268,25 +356,30 @@ void FFMPEGExtend::catchVideoFrame(int frameIndex)
 	packetOut->stream_index = videoStream->index;
 	av_write_frame(vFormatContextOutput, packetOut);
 
-	printf("Frame = %05d, PacketOutSize = %d\n", 
-		frameIndex, packetOut->size);
+	printf("courseId = %d, Frame = %05d, PacketOutSize = %d\n",
+		courseId, frameIndex, packetOut->size);
 
-	//free(jpegBuffer);
 	av_frame_free(&frameIn);   // FREE_FRAME_IN
 	av_free_packet(packetIn);  // FREE_PACKET_IN
 	av_free_packet(packetOut); // FREE_PACKET_OUT
+
+	return 0;
 }
 
-void FFMPEGExtend::catchJPEGFrame(int frameIndex)
+int FFMPEGExtend::catchJPEGFrame(int frameIndex)
 {
-	openCodecContextJPEG();
+	if (openCodecContextJPEG() < 0)
+	{
+		return -1;
+	}
 
 	AVPacket* packetIn = av_packet_alloc(); // ALLOC_PACKET_IN
 	AVFrame* frameIn = av_frame_alloc();    // ALLOC_FRAME_IN
 
 	if (av_read_frame(jpegFormatContext, packetIn) < 0)
 	{
-		return;
+		centerError("catchJPEGFrame av_read_frame jpegFormatContext");
+		return -1;
 	}
 
 	int gotPtr;
@@ -298,22 +391,22 @@ void FFMPEGExtend::catchJPEGFrame(int frameIndex)
 	videoFrame->width = width;
 	videoFrame->height = height;
 	videoFrame->pts = frameIndex*(videoStream->time_base.den) / ((videoStream->time_base.num) * fps);
-
+	
 	AVPacket *packetOut = av_packet_alloc(); // ALLOC_PACKET_OUT
 	avcodec_encode_video2(vCodecContextOutput, packetOut, videoFrame, &gotPtr);
 
 	packetOut->stream_index = videoStream->index;
 	av_write_frame(vFormatContextOutput, packetOut);
 
-	printf("Frame = %05d, PacketOutSize = %d\n",
-		frameIndex, packetOut->size);
+	printf("courseId = %s, Frame = %05d, PacketOutSize = %d\n",
+		courseId, frameIndex, packetOut->size);
 
 	av_frame_free(&frameIn);   // FREE_FRAME_IN
 	av_free_packet(packetIn);  // FREE_PACKET_IN
 	av_free_packet(packetOut); // FREE_PACKET_OUT
 
 	closeCodecContextJPEG();
-	return;
+	return 0;
 }
 
 void FFMPEGExtend::savePacketToJPEG(AVPacket *packet, int frame)
@@ -323,7 +416,7 @@ void FFMPEGExtend::savePacketToJPEG(AVPacket *packet, int frame)
 	sprintf_s(filename, 255, "%s%d.jpg", "temp\\", frame);
 
 	FILE *file = fopen(filename, "wb");
-	
+
 	fwrite(packet->data, sizeof(uint8_t), packet->size, file);
 	fclose(file);
 }
@@ -397,17 +490,26 @@ uint8_t *FFMPEGExtend::getFileBuffer()
 	return data;
 }
 
+void FFMPEGExtend::centerError(char *error)
+{
+	printf("%s\n", error);
+}
+
 void FFMPEGExtend::catchVideoStart()
 {
-	start();
+	if (isWorking == true) return;
+
+	if (start() < 0) return;
+
 	isWorking = true;
 	int frameIndex = 0;
 	while (isWorking)
 	{
-		if (kbhit()) catchVideoStop();
+		//if (kbhit()) catchVideoStop();
 
 #if(CAP_DEVICE == CAP_JPEG)
 		catchJPEGFrame(frameIndex);
+		Sleep((unsigned int)(1000.0f / 20.0f));
 #else
 		catchVideoFrame(frameIndex);
 #endif

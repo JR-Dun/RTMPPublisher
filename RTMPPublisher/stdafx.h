@@ -11,9 +11,10 @@
 #include <tchar.h> 
 #include <stdlib.h> 
 #include <conio.h>
+#include <windows.h>
 
 
 // TODO:  在此处引用程序需要的其他头文件
 
 #include "ffmpeg.h"
-#include "audio.h"
+//#include "audio.h"

@@ -1,57 +1,73 @@
 #pragma once
 
-typedef struct SwsContext SWSContext;
+using namespace System;
+using namespace System::Runtime::InteropServices;
+using namespace System::Collections::Generic;
 
-class FFMPEGExtend
-{
-public:
-	FFMPEGExtend(char *inputFilePath);
-	~FFMPEGExtend();
+namespace RTMPPublisher {
 
-public:
-	void getMp3Info();
-	void catchVideoStart();
-	void catchVideoStop();
+	typedef struct SwsContext SWSContext;
+
+	public class FFMPEGExtend
+	{
+	public:
+		FFMPEGExtend();
+		FFMPEGExtend(char *courseId);
+		FFMPEGExtend(char *inputPath, char *outputPath);
+		~FFMPEGExtend();
+
+	public:
+		void getMp3Info();
+		void catchVideoStart();
+		void catchVideoStop();
 
 
-private:
-	void init(char *inputFilePath);
-	void dealloc();
+	private:
+		void init(char *inputPath, char *outputPath);
+		void dealloc();
 
-	void start();
-	void stop();
-	void initInput();
-	void initOutput();
-	void initFrame();
+		int start();
+		void stop();
+		int initInput();
+		int initOutput();
+		void initFrame();
 
-	void openCodecContextJPEG();
-	void closeCodecContextJPEG();
+		int openCodecContextJPEG();
+		void closeCodecContextJPEG();
 
-	void catchVideoFrame(int frameIndex);
-	void catchJPEGFrame(int frameIndex);
-	void savePacketToJPEG(AVPacket *packet, int frame);
-	void saveFrameToJPEG(AVFrame *frame, int index);
-	void saveFrameToPPM(AVFrame *frame, int index);
+		int catchVideoFrame(int frameIndex);
+		int catchJPEGFrame(int frameIndex);
+		void savePacketToJPEG(AVPacket *packet, int frame);
+		void saveFrameToJPEG(AVFrame *frame, int index);
+		void saveFrameToPPM(AVFrame *frame, int index);
 
-	uint8_t *getFileBuffer();
+		uint8_t *getFileBuffer();
 
-public:
-	bool isWorking;
+		void centerError(char *error);
 
-private:
-	AVFormatContext	*vFormatContextInput;
-	AVCodecContext	*vCodecContextInput;
+	public:
+		char *courseId;
+		bool isWorking;
 
-	AVFormatContext	*vFormatContextOutput;
-	AVCodecContext	*vCodecContextOutput;
-	AVPixelFormat	 vPixelFormatOutput;
+	private:
+		char *inputFile;
+		char *output;
 
-	AVFormatContext	*jpegFormatContext;
-	AVCodecContext	*jpegCodecContext;
+		AVFormatContext	*vFormatContextInput;
+		AVCodecContext	*vCodecContextInput;
 
-	SWSContext		*vSWSContext;
-	SWSContext		*jpegSWSContext;
+		AVFormatContext	*vFormatContextOutput;
+		AVCodecContext	*vCodecContextOutput;
+		AVPixelFormat	 vPixelFormatOutput;
 
-	AVFrame			*videoFrame;
-	AVStream			*videoStream;
-};
+		AVFormatContext	*jpegFormatContext;
+		AVCodecContext	*jpegCodecContext;
+
+		SWSContext		*vSWSContext;
+		SWSContext		*jpegSWSContext;
+
+		AVFrame			*videoFrame;
+		AVStream		*videoStream;
+	};
+
+}
